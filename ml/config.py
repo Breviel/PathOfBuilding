@@ -26,8 +26,35 @@ for _d in (DATA_RAW_DIR, DATA_PROCESSED_DIR, CHECKPOINT_DIR):
 
 LEAGUE = os.getenv("POE_LEAGUE", "Settlers")  # change each league
 
-POE_NINJA_API = "https://poe.ninja/api/data"
-POE_NINJA_BUILDS_ENDPOINT = f"{POE_NINJA_API}/builds"
+# poe.ninja API base URLs (community-documented, see:
+#   https://github.com/Davenads/poeninjaAPI-2025
+#   https://github.com/JakubRak-gamedev/poeninja_API_guide)
+POE_NINJA_POE1_BASE = "https://poe.ninja/api/data"
+POE_NINJA_POE2_BASE = "https://poe.ninja/poe2/api"
+
+# Builds endpoint — returns character data (passive trees, items, skills)
+POE_NINJA_BUILDS_ENDPOINT = f"{POE_NINJA_POE1_BASE}/builds"
+
+# Economy endpoints — returns item/currency prices
+POE_NINJA_CURRENCY_ENDPOINT = f"{POE_NINJA_POE1_BASE}/currencyoverview"
+POE_NINJA_ITEM_ENDPOINT = f"{POE_NINJA_POE1_BASE}/itemoverview"
+
+# PoE2 economy endpoint (undocumented, discovered via network interception Oct 2025)
+POE_NINJA_POE2_ECONOMY = f"{POE_NINJA_POE2_BASE}/economy/currencyexchange/overview"
+
+# Supported economy item types for itemoverview endpoint
+POE_NINJA_ITEM_TYPES = [
+    "Currency", "Fragment",          # currencyoverview
+    "UniqueWeapon", "UniqueArmour", "UniqueAccessory",
+    "UniqueFlask", "UniqueJewel", "UniqueRelic",
+    "SkillGem", "ClusterJewel",
+    "Oil", "Incubator", "Scarab", "Fossil", "Resonator",
+    "Essence", "DivinationCard", "Beast", "BaseType",
+    "HelmetEnchant", "UniqueMap", "Map",
+    "BlightedMap", "BlightRavagedMap",
+    "DeliriumOrb", "Invitation", "Memory",
+    "Coffin", "AllflameEmber", "Omen",
+]
 
 GGG_PASSIVE_TREE_URL = (
     "https://www.pathofexile.com/passive-skill-tree"  # HTML; JSON via JS
@@ -42,9 +69,13 @@ MAXROLL_ATLAS_PLANNER_URL = "https://maxroll.gg/poe/poe-atlas-tree"
 POE_VAULT_ATLAS_URL = "https://www.poe-vault.com/guides/atlas-passive-skill-tree-strategies"
 POE_NINJA_ATLAS_URL = "https://poe.ninja/builds/atlas"
 
-# Rate-limit guards (requests per second)
-POE_NINJA_RPS = 2
-POE_TRADE_RPS = 1  # GGG enforces strict limits
+# Rate-limit guards
+# poe.ninja enforces 12 requests per 5 minutes (= 0.04 rps sustained)
+# We use conservative defaults that stay well under the limit.
+POE_NINJA_MAX_REQUESTS = 12
+POE_NINJA_WINDOW_SECONDS = 300        # 5 minutes
+POE_NINJA_RPS = 2                      # burst rate; overall limited by window
+POE_TRADE_RPS = 1                      # GGG enforces strict limits
 
 # ── Feature engineering ────────────────────────────────────────────────
 

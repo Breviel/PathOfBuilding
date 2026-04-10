@@ -1,4 +1,4 @@
-.PHONY: help collect-data features train-build-tree train-atlas train-gear train-all serve test clean
+.PHONY: help collect-data features train-build-tree train-atlas train-gear train-all serve test clean probe
 
 PYTHON ?= python
 VENV   ?= .venv/bin/python
@@ -9,13 +9,19 @@ help: ## Show this help
 
 # ── Data Collection ────────────────────────────────────────────────────
 
-collect-data: ## Collect builds from poe.ninja + parse tree data + atlas strategies
-	$(PYTHON) -m ml.data.collectors.poe_ninja
+probe: ## Test poe.ninja API connectivity (use before collecting)
+	$(PYTHON) -m ml.data.collectors.probe_api
+
+collect-data: ## Collect builds + economy from poe.ninja + tree data + atlas strategies
+	$(PYTHON) -m ml.data.collectors.poe_ninja all
 	$(PYTHON) -m ml.data.collectors.tree_data
 	$(PYTHON) -m ml.data.collectors.atlas_data
 
-collect-ninja: ## Collect builds from poe.ninja only
-	$(PYTHON) -m ml.data.collectors.poe_ninja
+collect-builds: ## Collect builds from poe.ninja (trees, items, skills)
+	$(PYTHON) -m ml.data.collectors.poe_ninja builds
+
+collect-economy: ## Collect economy snapshot from poe.ninja (currency + item prices)
+	$(PYTHON) -m ml.data.collectors.poe_ninja economy
 
 collect-tree: ## Parse and export PoB passive tree data
 	$(PYTHON) -m ml.data.collectors.tree_data

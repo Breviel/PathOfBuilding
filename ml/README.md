@@ -48,7 +48,8 @@ ml/
 │
 ├── data/
 │   ├── collectors/
-│   │   ├── poe_ninja.py               ← scrape builds from poe.ninja
+│   │   ├── poe_ninja.py               ← builds + economy from poe.ninja JSON API
+│   │   ├── probe_api.py               ← standalone API connectivity tester
 │   │   ├── pob_parser.py              ← parse PoB XML / build codes
 │   │   ├── tree_data.py               ← parse GGG passive-tree JSON
 │   │   ├── atlas_data.py              ← scrape atlas trees from poe-atlas.com + poe.ninja
@@ -89,6 +90,36 @@ ml/
 | **Craft of Exile** | `craftofexile.com` (manual) | Crafting cost estimates, mod weights |
 
 All raw data is saved under `data/raw/` and is **gitignored**.
+
+### ⚠️ Correct way to fetch data from poe.ninja
+
+poe.ninja is a **Single-Page Application** (SPA). Scraping its HTML with
+`urllib` or `requests` + regex will only give you a JS bundle — **no build
+or price data**.  Always use the **JSON API** endpoints:
+
+```
+# Builds (trees, items, skills, DPS):
+GET https://poe.ninja/api/data/builds?overview={league}&type=exp&language=en
+
+# Currency prices:
+GET https://poe.ninja/api/data/currencyoverview?league={league}&type=Currency
+
+# Item prices:
+GET https://poe.ninja/api/data/itemoverview?league={league}&type={type}
+```
+
+No authentication required.  Rate limit: **12 requests / 5 minutes**.
+
+```bash
+# Test connectivity:
+python -m ml.data.collectors.probe_api --league Settlers
+
+# Discover available league names:
+python -m ml.data.collectors.probe_api --discover-leagues
+```
+
+API docs: [Davenads/poeninjaAPI-2025](https://github.com/Davenads/poeninjaAPI-2025),
+[JakubRak-gamedev/poeninja_API_guide](https://github.com/JakubRak-gamedev/poeninja_API_guide).
 
 ---
 
