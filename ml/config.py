@@ -24,7 +24,7 @@ for _d in (DATA_RAW_DIR, DATA_PROCESSED_DIR, CHECKPOINT_DIR):
 
 # ── League / API ───────────────────────────────────────────────────────
 
-LEAGUE = os.getenv("POE_LEAGUE", "Settlers")  # change each league
+LEAGUE = os.getenv("POE_LEAGUE", "Mirage")  # change each league
 
 # poe.ninja API base URLs (community-documented, see:
 #   https://github.com/Davenads/poeninjaAPI-2025

@@ -26,6 +26,7 @@ Documentation:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from typing import Any
@@ -34,11 +35,17 @@ import requests
 
 # ── Configuration ──────────────────────────────────────────────────────
 
+# ⚠ This MUST be the API base, NOT the frontend SPA URL.
+#    CORRECT:  https://poe.ninja/api/data        (JSON API — returns data)
+#    WRONG:    https://poe.ninja/poe1/mirage      (SPA page — returns JS bundle)
+#    WRONG:    https://poe.ninja/poe1/builds/...   (also SPA)
+#
+# The league name goes in the *query parameter*, not the base path.
 POE_NINJA_BASE = "https://poe.ninja/api/data"
 POE_OFFICIAL_API = "https://api.pathofexile.com"
 # Update this to the current challenge league each cycle.
 # Override at runtime with --league or POE_LEAGUE env var.
-DEFAULT_LEAGUE = "Settlers"
+DEFAULT_LEAGUE = os.environ.get("POE_LEAGUE", "Mirage")
 
 HEADERS = {
     "User-Agent": "PoB-ML-Probe/1.0 (github.com/Breviel/PathOfBuilding)",
@@ -209,7 +216,7 @@ def discover_leagues() -> list[str]:
     except Exception as exc:
         print(f"  ✗ Failed: {exc}")
         print("  Falling back to common league names:")
-        common = ["Settlers", "Standard", "Hardcore"]
+        common = ["Mirage", "Standard", "Hardcore"]
         for name in common:
             print(f"    - {name}")
         return common
@@ -252,6 +259,17 @@ def main() -> None:
             print(json.dumps(leagues, indent=2))
         return
 
+    # Guard: detect if someone edited POE_NINJA_BASE to a frontend URL
+    if "/poe1/" in POE_NINJA_BASE or "/poe2/" in POE_NINJA_BASE or "/builds/" in POE_NINJA_BASE:
+        print(f"\n  ⚠  ERROR: POE_NINJA_BASE looks like a frontend SPA URL, not the API.")
+        print(f"     Current: {POE_NINJA_BASE}")
+        print(f"     Expected: https://poe.ninja/api/data")
+        print(f"\n  The league name goes in the query parameter, not the base URL:")
+        print(f"     /api/data/builds?overview=Mirage  ← correct")
+        print(f"     /poe1/mirage/builds               ← wrong (SPA page, returns JS)")
+        print(f"\n  Fix: set POE_NINJA_BASE = \"https://poe.ninja/api/data\"")
+        sys.exit(1)
+
     if args.test_league:
         ok = test_league_name(args.test_league)
         status = "✓ works" if ok else "✗ not found"
@@ -282,7 +300,7 @@ def main() -> None:
 
     if ok == 0:
         print(f"\n  All endpoints failed. Possible causes:")
-        print(f"    1. Wrong league name (try: Standard, Settlers, …)")
+        print(f"    1. Wrong league name (try: Mirage, Standard, …)")
         print(f"    2. Network blocked (sandboxed environment)")
         print(f"    3. poe.ninja is temporarily down")
         print(f"\n  To discover available leagues:")
