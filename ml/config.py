@@ -30,36 +30,37 @@ LEAGUE = os.getenv("POE_LEAGUE", "Mirage")  # change each league
 #   https://github.com/Davenads/poeninjaAPI-2025
 #   https://github.com/JakubRak-gamedev/poeninja_API_guide)
 #
-# Economy endpoints (currency, items) live under /api/data/.
-# Builds use /api/data/0/getbuildoverview (the "0" is a static path segment).
-# Index-state lives under /poe1/api/data/ for league/snapshot metadata.
+# PoE 1 ONLY — all builds and economy endpoints target Path of Exile 1.
+# PoE 2 leagues (e.g. phrecia2.0, keepers) are intentionally ignored.
+#
+# Economy endpoints (currency, items) live under /api/data/ (no poe1 prefix).
+# Builds use a versioned 2-step flow under /poe1/api/data/ and /poe1/api/builds/.
+# Index-state lives under /poe1/api/data/ for PoE 1 league/snapshot metadata.
 POE_NINJA_API_BASE = "https://poe.ninja/api/data"
 POE_NINJA_POE1_API_BASE = "https://poe.ninja/poe1/api/data"
 
-# Builds overview endpoint — returns character data (passive trees, items, skills)
-# Known working format (confirmed from multiple open-source projects):
-#   GET /api/data/0/getbuildoverview?overview={league_lowercase}&type=exp&language=en
-# Response: { classNames, uniqueItems, keystoneHashes, skills, builds: [...] }
-#
-# When poe.ninja added PoE2 support, some endpoints moved under /poe1/.
-# We try three candidates in order (see poe_ninja.py _get_builds_json):
-#   1. /poe1/api/data/0/getbuildoverview  (poe1-prefixed, current)
-#   2. /api/data/0/getbuildoverview        (original, no prefix)
-#   3. /poe1/api/data/getbuildoverview     (without /0/ segment)
-POE_NINJA_BUILDS_ENDPOINT = f"{POE_NINJA_POE1_API_BASE}/0/getbuildoverview"
-POE_NINJA_BUILDS_ENDPOINT_ALT = f"{POE_NINJA_API_BASE}/0/getbuildoverview"
-POE_NINJA_BUILDS_ENDPOINT_FALLBACK = f"{POE_NINJA_POE1_API_BASE}/getbuildoverview"
-
-# Index-state endpoint — returns league info and snapshot versions
-# Used for discovering leagues and for individual character lookups.
+# Index-state endpoint — returns PoE 1 league info and snapshot versions
+# Used for discovering leagues and resolving snapshot versions for builds.
 #   GET /poe1/api/data/index-state
 #   → { buildLeagues, economyLeagues, snapshotVersions }
+#   buildLeagues[].url is the lowercase league slug (e.g. "mirage").
+#   snapshotVersions[].version is used in builds API path (e.g. "1056-20260410-17302").
 POE_NINJA_INDEX_STATE_ENDPOINT = f"{POE_NINJA_POE1_API_BASE}/index-state"
 
-# Individual character detail (requires snapshot version from index-state):
+# Versioned builds base URL — PoE 1 only.
+# Step 1: resolve snapshot version from index-state (snapshotVersions[].version).
+# Step 2 (bulk overview):
+#   GET /poe1/api/builds/{version}/overview
+#       ?overview={league_url}&type=0
+# Step 2 (individual character):
 #   GET /poe1/api/builds/{version}/character
-#       ?account={acct}&name={name}&overview={league_url}&type=0
-POE_NINJA_BUILDS_CHARACTER_BASE = "https://poe.ninja/poe1/api/builds"
+#       ?account={acct}&name={name}&overview={league_url}&type=0&timeMachine=
+#
+# version   — from snapshotVersions[].version (e.g. "1056-20260410-17302")
+# league_url — lowercase slug from buildLeagues[].url (e.g. "mirage")
+# type      — numeric: 0=exp, 1=depthsolo
+POE_NINJA_BUILDS_BASE = "https://poe.ninja/poe1/api/builds"
+POE_NINJA_BUILDS_CHARACTER_BASE = POE_NINJA_BUILDS_BASE  # alias kept for back-compat
 
 # Economy endpoints — returns item/currency prices
 POE_NINJA_CURRENCY_ENDPOINT = f"{POE_NINJA_API_BASE}/currencyoverview"

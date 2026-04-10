@@ -12,13 +12,16 @@ IMPORTANT: poe.ninja is a Single-Page Application (SPA).  Scraping its
 HTML (like with urllib + regex) will only give you a JS bundle, NOT build
 data.  The correct approach is to use the **JSON API endpoints**:
 
-  Builds:    https://poe.ninja/api/data/0/getbuildoverview?overview={league_lowercase}&type=exp&language=en
-             (also try with /poe1/ prefix: /poe1/api/data/0/getbuildoverview)
+  Builds (PoE 1 only, versioned 2-step flow):
+    Step 1:  GET /poe1/api/data/index-state
+             → snapshotVersions[].version  (e.g. "1056-20260410-17302")
+    Step 2:  GET /poe1/api/builds/{version}/overview?overview={league_slug}&type=0
+
   Currency:  https://poe.ninja/api/data/currencyoverview?league={league}&type=Currency
   Items:     https://poe.ninja/api/data/itemoverview?league={league}&type={type}
 
-  Index-state (league/snapshot metadata):
-             https://poe.ninja/poe1/api/data/index-state
+  league_slug is the lowercase URL form (e.g. "mirage"), NOT the display name.
+  type=0 means experience-ladder builds.
 
 No auth required.  Rate limit: 12 requests / 5 minutes.
 
@@ -85,41 +88,24 @@ def _get(url: str, params: dict[str, str] | None = None, retries: int = 3) -> di
 # ── Probes ─────────────────────────────────────────────────────────────
 
 def probe_builds(league: str) -> dict[str, Any]:
-    """Test builds API using multi-candidate fallback.
+    """Test PoE 1 builds API using the versioned 2-step flow.
 
-    Tries the builds overview endpoint with several URL variants:
-    1. /poe1/api/data/0/getbuildoverview (poe1-prefixed)
-    2. /api/data/0/getbuildoverview (original)
-    3. /poe1/api/data/getbuildoverview (without /0/ segment)
+    Step 1: GET /poe1/api/data/index-state → resolve snapshot version.
+    Step 2: GET /poe1/api/builds/{version}/overview?overview={slug}&type=0
 
-    Also probes the index-state endpoint for league/snapshot metadata.
+    Only PoE 1 leagues are targeted.  PoE 2 leagues (e.g. phrecia2.0,
+    keepers) are ignored even if they appear in the index-state response.
     """
     index_state_url = "https://poe.ninja/poe1/api/data/index-state"
-
-    # Builds overview endpoint candidates
-    league_lower = league.lower()
-    builds_candidates = [
-        (
-            "https://poe.ninja/poe1/api/data/0/getbuildoverview",
-            {"overview": league_lower, "type": "exp", "language": "en"},
-        ),
-        (
-            "https://poe.ninja/api/data/0/getbuildoverview",
-            {"overview": league_lower, "type": "exp", "language": "en"},
-        ),
-        (
-            "https://poe.ninja/poe1/api/data/getbuildoverview",
-            {"overview": league_lower, "type": "exp", "language": "en"},
-        ),
-    ]
+    builds_base = "https://poe.ninja/poe1/api/builds"
 
     print(f"\n{'═' * 70}")
-    print(f"  BUILDS PROBE (multi-candidate fallback)")
+    print(f"  BUILDS PROBE (PoE 1 versioned 2-step flow)")
     print(f"  League: '{league}'")
     print(f"{'═' * 70}")
 
-    # Step 0: Fetch index-state for league discovery
-    print(f"\n  Index-state: {index_state_url}")
+    # Step 1: Fetch index-state for league discovery + snapshot version.
+    print(f"\n  Step 1: Fetching index-state → {index_state_url}")
     try:
         index_data = _get(index_state_url)
         build_leagues = index_data.get("buildLeagues", [])
@@ -130,55 +116,93 @@ def probe_builds(league: str) -> dict[str, Any]:
         for s in snapshots:
             print(f"    Snapshot: {s.get('url')}/{s.get('type')} → {s.get('version')}")
     except Exception as exc:
-        print(f"  ⚠ index-state failed (non-fatal): {exc}")
+        print(f"  ✗ index-state failed: {exc}")
+        return {"status": "FAILED", "error": f"index-state: {exc}"}
 
-    # Step 1: Try builds overview candidates
-    for url, params in builds_candidates:
-        print(f"\n  Trying: {url}")
-        print(f"    Params: {params}")
-        try:
-            data = _get(url, params)
-            top_keys = list(data.keys())
-            builds = data.get("builds", [])
-            class_names = data.get("classNames", [])
+    # Resolve league slug and snapshot version (PoE 1 only).
+    league_lower = league.lower()
+    league_url: str | None = None
+    for bl in build_leagues:
+        if bl.get("name", "").lower() == league_lower or bl.get("url", "") == league_lower:
+            league_url = bl.get("url")
+            break
 
-            print(f"  ✓ SUCCESS")
-            print(f"  ✓ Response top-level keys: {top_keys}")
-            print(f"  ✓ classNames: {class_names}")
-            print(f"  ✓ {len(builds)} builds returned")
+    if not league_url:
+        available = [bl.get("name") for bl in build_leagues]
+        msg = f"League {league!r} not found in PoE 1 build leagues. Available: {available}"
+        print(f"  ✗ {msg}")
+        return {"status": "FAILED", "error": msg}
 
-            if builds:
-                sample = builds[0]
-                print(f"\n  Sample build record keys:")
-                for k, v in sample.items():
-                    vtype = type(v).__name__
-                    if isinstance(v, list):
-                        vinfo = f"list[{len(v)}]"
-                    elif isinstance(v, dict):
-                        vinfo = f"dict[{len(v)} keys]"
-                    elif isinstance(v, str):
-                        vinfo = repr(v[:60])
-                    else:
-                        vinfo = repr(v)
-                    print(f"    {k:20s} : {vtype:8s} = {vinfo}")
+    version: str | None = None
+    for snap in snapshots:
+        if snap.get("url") == league_url and snap.get("type") == "exp":
+            version = snap.get("version")
+            break
+    if not version:
+        for snap in snapshots:
+            if snap.get("url") == league_url:
+                version = snap.get("version")
+                break
 
-                tree = sample.get("treeHashes", [])
-                print(f"\n  Passive tree: {len(tree)} node IDs")
-                if tree:
-                    print(f"    First 10: {tree[:10]}")
+    if not version:
+        msg = f"No snapshot found for league {league!r} (url={league_url!r})"
+        print(f"  ✗ {msg}")
+        return {"status": "FAILED", "error": msg}
 
-            return {
-                "status": "OK",
-                "endpoint": url,
-                "n_builds": len(builds),
-                "classNames": class_names,
-            }
+    # Step 2: Fetch builds overview using the resolved snapshot version.
+    url = f"{builds_base}/{version}/overview"
+    params = {"overview": league_url, "type": "0"}
+    print(f"\n  Step 2: Fetching builds → {url}")
+    print(f"    Params: {params}")
+    try:
+        data = _get(url, params)
+        top_keys = list(data.keys())
+        builds = data.get("builds", [])
+        class_names = data.get("classNames", [])
 
-        except Exception as exc:
-            print(f"  ✗ Failed: {exc}")
+        print(f"  ✓ SUCCESS")
+        print(f"  ✓ Response top-level keys: {top_keys}")
+        print(f"  ✓ classNames: {class_names}")
+        print(f"  ✓ {len(builds)} builds returned")
 
-    print(f"\n  ✗ All builds endpoints failed")
-    return {"status": "FAILED", "error": "All builds endpoint candidates returned errors"}
+        if builds:
+            sample = builds[0]
+            print(f"\n  Sample build record keys:")
+            for k, v in sample.items():
+                vtype = type(v).__name__
+                if isinstance(v, list):
+                    vinfo = f"list[{len(v)}]"
+                elif isinstance(v, dict):
+                    vinfo = f"dict[{len(v)} keys]"
+                elif isinstance(v, str):
+                    vinfo = repr(v[:60])
+                else:
+                    vinfo = repr(v)
+                print(f"    {k:20s} : {vtype:8s} = {vinfo}")
+
+            tree = sample.get("treeHashes", [])
+            print(f"\n  Passive tree: {len(tree)} node IDs")
+            if tree:
+                print(f"    First 10: {tree[:10]}")
+
+        return {
+            "status": "OK",
+            "endpoint": url,
+            "version": version,
+            "league_url": league_url,
+            "n_builds": len(builds),
+            "classNames": class_names,
+        }
+
+    except Exception as exc:
+        print(f"  ✗ Builds overview failed: {exc}")
+        return {
+            "status": "FAILED",
+            "error": str(exc),
+            "endpoint": url,
+            "version": version,
+            "league_url": league_url,
+        }
 
 
 def probe_currency(league: str) -> dict[str, Any]:
@@ -318,7 +342,7 @@ def main() -> None:
         print(f"     Current: {POE_NINJA_BASE}")
         print(f"     Expected: https://poe.ninja/api/data")
         print(f"\n  Economy endpoints use /api/data/ (no poe1 prefix).")
-        print(f"  Builds use /api/data/0/getbuildoverview or /poe1/api/data/0/getbuildoverview")
+        print(f"  Builds use the versioned flow: /poe1/api/builds/{{version}}/overview")
         print(f"\n  Fix: set POE_NINJA_BASE = \"https://poe.ninja/api/data\"")
         sys.exit(1)
 
@@ -333,7 +357,7 @@ def main() -> None:
     print(f"{'━' * 70}")
     print(f"\n  Correct approach: use JSON API, not HTML scraping.")
     print(f"  Economy base: {POE_NINJA_BASE}")
-    print(f"  Builds: /api/data/0/getbuildoverview (or /poe1/api/data/0/getbuildoverview)")
+    print(f"  Builds: versioned 2-step flow via /poe1/api/builds/{{version}}/overview (PoE 1 only)")
     print(f"  Docs: https://github.com/Davenads/poeninjaAPI-2025")
 
     results = {}
