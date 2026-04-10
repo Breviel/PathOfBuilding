@@ -12,7 +12,8 @@ IMPORTANT: poe.ninja is a Single-Page Application (SPA).  Scraping its
 HTML (like with urllib + regex) will only give you a JS bundle, NOT build
 data.  The correct approach is to use the **JSON API endpoints**:
 
-  Builds:    https://poe.ninja/api/data/builds?overview={league}&type=exp&language=en
+  Builds:    https://poe.ninja/api/data/buildoverview?league={league}&language=en
+             (legacy: https://poe.ninja/api/data/builds?overview={league}&type=exp&language=en)
   Currency:  https://poe.ninja/api/data/currencyoverview?league={league}&type=Currency
   Items:     https://poe.ninja/api/data/itemoverview?league={league}&type={type}
 
@@ -81,51 +82,78 @@ def _get(url: str, params: dict[str, str] | None = None, retries: int = 3) -> di
 # ── Probes ─────────────────────────────────────────────────────────────
 
 def probe_builds(league: str) -> dict[str, Any]:
-    """Test builds API and show response structure."""
-    url = f"{POE_NINJA_BASE}/builds"
-    params = {"overview": league, "type": "exp", "language": "en"}
+    """Test builds API and show response structure.
+
+    Tries the new ``/buildoverview`` endpoint first, falls back to
+    the legacy ``/builds`` endpoint.
+    """
+    # Endpoint candidates: (url, params, label)
+    candidates = [
+        (
+            f"{POE_NINJA_BASE}/buildoverview",
+            {"league": league, "language": "en"},
+            "buildoverview (new)",
+        ),
+        (
+            f"{POE_NINJA_BASE}/builds",
+            {"overview": league, "type": "exp", "language": "en"},
+            "builds (legacy)",
+        ),
+    ]
 
     print(f"\n{'═' * 70}")
-    print(f"  BUILDS PROBE — {url}")
-    print(f"  Params: {params}")
+    print(f"  BUILDS PROBE")
+    print(f"  Trying {len(candidates)} endpoint variant(s) for league '{league}'")
     print(f"{'═' * 70}")
 
-    try:
-        data = _get(url, params)
-        top_keys = list(data.keys())
-        builds = data.get("builds", [])
-        class_names = data.get("classNames", [])
+    for url, params, label in candidates:
+        print(f"\n  → Trying {label}: {url}")
+        print(f"    Params: {params}")
 
-        print(f"  ✓ Response top-level keys: {top_keys}")
-        print(f"  ✓ classNames: {class_names}")
-        print(f"  ✓ {len(builds)} builds returned")
+        try:
+            data = _get(url, params)
+            top_keys = list(data.keys())
+            builds = data.get("builds", [])
+            class_names = data.get("classNames", [])
 
-        if builds:
-            sample = builds[0]
-            print(f"\n  Sample build record keys:")
-            for k, v in sample.items():
-                vtype = type(v).__name__
-                if isinstance(v, list):
-                    vinfo = f"list[{len(v)}]"
-                elif isinstance(v, dict):
-                    vinfo = f"dict[{len(v)} keys]"
-                elif isinstance(v, str):
-                    vinfo = repr(v[:60])
-                else:
-                    vinfo = repr(v)
-                print(f"    {k:20s} : {vtype:8s} = {vinfo}")
+            print(f"  ✓ SUCCESS via {label}")
+            print(f"  ✓ Response top-level keys: {top_keys}")
+            print(f"  ✓ classNames: {class_names}")
+            print(f"  ✓ {len(builds)} builds returned")
 
-            # Show tree hashes
-            tree = sample.get("treeHashes", [])
-            print(f"\n  Passive tree: {len(tree)} node IDs")
-            if tree:
-                print(f"    First 10: {tree[:10]}")
+            if builds:
+                sample = builds[0]
+                print(f"\n  Sample build record keys:")
+                for k, v in sample.items():
+                    vtype = type(v).__name__
+                    if isinstance(v, list):
+                        vinfo = f"list[{len(v)}]"
+                    elif isinstance(v, dict):
+                        vinfo = f"dict[{len(v)} keys]"
+                    elif isinstance(v, str):
+                        vinfo = repr(v[:60])
+                    else:
+                        vinfo = repr(v)
+                    print(f"    {k:20s} : {vtype:8s} = {vinfo}")
 
-        return {"status": "OK", "n_builds": len(builds), "classNames": class_names}
+                # Show tree hashes
+                tree = sample.get("treeHashes", [])
+                print(f"\n  Passive tree: {len(tree)} node IDs")
+                if tree:
+                    print(f"    First 10: {tree[:10]}")
 
-    except Exception as exc:
-        print(f"  ✗ FAILED: {exc}")
-        return {"status": "FAILED", "error": str(exc)}
+            return {
+                "status": "OK",
+                "endpoint": label,
+                "n_builds": len(builds),
+                "classNames": class_names,
+            }
+
+        except Exception as exc:
+            print(f"  ✗ {label} failed: {exc}")
+
+    print(f"\n  ✗ All builds endpoints failed for league '{league}'")
+    return {"status": "FAILED", "error": "All builds endpoints returned errors"}
 
 
 def probe_currency(league: str) -> dict[str, Any]:

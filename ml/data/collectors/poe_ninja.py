@@ -44,6 +44,7 @@ from ml.config import (
     DATA_RAW_DIR,
     LEAGUE,
     POE_NINJA_BUILDS_ENDPOINT,
+    POE_NINJA_BUILDS_ENDPOINT_LEGACY,
     POE_NINJA_CURRENCY_ENDPOINT,
     POE_NINJA_ITEM_ENDPOINT,
     POE_NINJA_ITEM_TYPES,
@@ -137,9 +138,13 @@ async def _get_json(
 
 # poe.ninja builds API:
 #
+# NEW (2026+):
+#   GET https://poe.ninja/api/data/buildoverview?league={league}&language=en
+#
+# LEGACY (pre-2026):
 #   GET https://poe.ninja/api/data/builds?overview={league}&type=exp&language=en
 #
-# Response (JSON):
+# Response (JSON, same format for both):
 #   {
 #     "classNames":       ["Marauder", "Ranger", ...],
 #     "uniqueItems":      [...],        ← shared lookup tables
@@ -167,12 +172,58 @@ async def _get_json(
 # Per-class filter (returns same structure, fewer builds):
 #   &class={ClassName}
 
-def _builds_url(league: str, class_name: str | None = None) -> str:
-    """Build the correct poe.ninja builds query URL."""
-    url = f"{POE_NINJA_BUILDS_ENDPOINT}?overview={league}&type=exp&language=en"
+# ── Builds endpoint candidates ─────────────────────────────────────────
+# We try the new /buildoverview endpoint first, then fall back to /builds.
+
+_BUILDS_ENDPOINTS: list[tuple[str, dict[str, str]]] = []
+
+
+def _init_builds_endpoints(league: str, class_name: str | None = None) -> list[tuple[str, dict[str, str]]]:
+    """Return a list of (url, params) pairs to try for builds data."""
+    candidates: list[tuple[str, dict[str, str]]] = []
+
+    # NEW endpoint: /buildoverview?league={league}
+    params_new: dict[str, str] = {"league": league, "language": "en"}
     if class_name:
-        url += f"&class={class_name}"
-    return url
+        params_new["class"] = class_name
+    candidates.append((POE_NINJA_BUILDS_ENDPOINT, params_new))
+
+    # LEGACY endpoint: /builds?overview={league}&type=exp
+    params_legacy: dict[str, str] = {"overview": league, "type": "exp", "language": "en"}
+    if class_name:
+        params_legacy["class"] = class_name
+    candidates.append((POE_NINJA_BUILDS_ENDPOINT_LEGACY, params_legacy))
+
+    return candidates
+
+
+async def _get_builds_json(
+    session: aiohttp.ClientSession,
+    rate_limiter: _RateLimiter,
+    league: str,
+    class_name: str | None = None,
+) -> dict[str, Any]:
+    """
+    Fetch builds data, trying the new endpoint first then falling back.
+
+    Returns the parsed JSON response from whichever endpoint succeeds.
+    Raises RuntimeError if all endpoints fail.
+    """
+    candidates = _init_builds_endpoints(league, class_name)
+    last_exc: Exception | None = None
+
+    for url, params in candidates:
+        try:
+            logger.debug(f"Trying builds endpoint: {url} params={params}")
+            return await _get_json(session, url, rate_limiter, params=params)
+        except Exception as exc:
+            logger.debug(f"Endpoint {url} failed: {exc}")
+            last_exc = exc
+
+    raise RuntimeError(
+        f"All builds endpoints failed for league={league!r}, class={class_name!r}. "
+        f"Last error: {last_exc}"
+    ) from last_exc
 
 
 def _normalise_build(
@@ -220,9 +271,8 @@ async def collect_builds(
 
     async with aiohttp.ClientSession(headers=_HEADERS, timeout=_TIMEOUT) as session:
         # 1. Overview — shared lookup tables
-        overview_url = _builds_url(league)
-        logger.info(f"Fetching overview: {overview_url}")
-        overview = await _get_json(session, overview_url, rl)
+        logger.info(f"Fetching builds overview for {league}")
+        overview = await _get_builds_json(session, rl, league)
         class_names = overview.get("classNames", [])
 
         lookup_path = out_dir / "lookup_tables.json"
@@ -237,10 +287,9 @@ async def collect_builds(
 
         # 2. Per-class builds
         for cls in classes:
-            url = _builds_url(league, cls)
-            logger.info(f"Collecting {cls} (max {max_per_class}) — {url}")
+            logger.info(f"Collecting {cls} (max {max_per_class})")
             try:
-                data = await _get_json(session, url, rl)
+                data = await _get_builds_json(session, rl, league, cls)
             except Exception as exc:
                 logger.warning(f"Failed to fetch {cls}: {exc}")
                 continue
@@ -365,17 +414,15 @@ async def probe_api(league: str | None = None) -> dict[str, Any]:
     rl = _RateLimiter()
 
     async with aiohttp.ClientSession(headers=_HEADERS, timeout=_TIMEOUT) as session:
-        # 1. Builds overview
-        url = _builds_url(league)
-        logger.info(f"Probing builds: {url}")
+        # 1. Builds overview (try new + legacy endpoints)
+        logger.info(f"Probing builds for {league} (trying multiple endpoints)")
         try:
-            data = await _get_json(session, url, rl)
+            data = await _get_builds_json(session, rl, league)
             n_builds = len(data.get("builds", []))
             class_names = data.get("classNames", [])
             sample_keys = list(data.get("builds", [{}])[0].keys()) if n_builds else []
             results["endpoints"]["builds"] = {
                 "status": "OK",
-                "url": url,
                 "n_builds": n_builds,
                 "classNames": class_names,
                 "top_level_keys": list(data.keys()),

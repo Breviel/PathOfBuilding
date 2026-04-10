@@ -33,7 +33,11 @@ POE_NINJA_POE1_BASE = "https://poe.ninja/api/data"
 POE_NINJA_POE2_BASE = "https://poe.ninja/poe2/api"
 
 # Builds endpoint — returns character data (passive trees, items, skills)
-POE_NINJA_BUILDS_ENDPOINT = f"{POE_NINJA_POE1_BASE}/builds"
+# As of 2026, poe.ninja migrated from /builds?overview={league} to
+# /buildoverview?league={league}.  We try the new endpoint first and
+# fall back to the legacy one (see poe_ninja.py `_builds_url`).
+POE_NINJA_BUILDS_ENDPOINT = f"{POE_NINJA_POE1_BASE}/buildoverview"
+POE_NINJA_BUILDS_ENDPOINT_LEGACY = f"{POE_NINJA_POE1_BASE}/builds"
 
 # Economy endpoints — returns item/currency prices
 POE_NINJA_CURRENCY_ENDPOINT = f"{POE_NINJA_POE1_BASE}/currencyoverview"
