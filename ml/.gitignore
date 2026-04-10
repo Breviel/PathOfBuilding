@@ -1,0 +1,17 @@
+# Raw downloaded data (large, not for VCS)
+data/raw/
+data/processed/
+
+# Model checkpoints
+checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
