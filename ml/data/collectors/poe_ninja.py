@@ -3,7 +3,7 @@ poe.ninja data collector — builds + economy.
 
 Collects from the poe.ninja public JSON API (no auth required):
 
-**Builds** (`/api/data/builds`):
+**Builds** (`/poe1/api/data/buildoverview`):
 - Passive tree allocations (node hashes / IDs)
 - Equipped gear (base types, mods, sockets)
 - Skill gem setups (active + support links)
@@ -44,6 +44,7 @@ from ml.config import (
     DATA_RAW_DIR,
     LEAGUE,
     POE_NINJA_BUILDS_ENDPOINT,
+    POE_NINJA_BUILDS_ENDPOINT_ALT,
     POE_NINJA_BUILDS_ENDPOINT_LEGACY,
     POE_NINJA_CURRENCY_ENDPOINT,
     POE_NINJA_ITEM_ENDPOINT,
@@ -138,13 +139,16 @@ async def _get_json(
 
 # poe.ninja builds API:
 #
-# NEW (2026+):
+# CURRENT (2026+, poe1-prefixed):
+#   GET https://poe.ninja/poe1/api/data/buildoverview?league={league}&language=en
+#
+# ALT (buildoverview without poe1 prefix — may redirect):
 #   GET https://poe.ninja/api/data/buildoverview?league={league}&language=en
 #
 # LEGACY (pre-2026):
 #   GET https://poe.ninja/api/data/builds?overview={league}&type=exp&language=en
 #
-# Response (JSON, same format for both):
+# Response (JSON, same format for all):
 #   {
 #     "classNames":       ["Marauder", "Ranger", ...],
 #     "uniqueItems":      [...],        ← shared lookup tables
@@ -173,7 +177,8 @@ async def _get_json(
 #   &class={ClassName}
 
 # ── Builds endpoint candidates ─────────────────────────────────────────
-# We try the new /buildoverview endpoint first, then fall back to /builds.
+# We try the poe1-prefixed endpoint first, then the unprefixed variant,
+# then fall back to the legacy /builds endpoint.
 
 _BUILDS_ENDPOINTS: list[tuple[str, dict[str, str]]] = []
 
@@ -182,13 +187,19 @@ def _init_builds_endpoints(league: str, class_name: str | None = None) -> list[t
     """Return a list of (url, params) pairs to try for builds data."""
     candidates: list[tuple[str, dict[str, str]]] = []
 
-    # NEW endpoint: /buildoverview?league={league}
-    params_new: dict[str, str] = {"league": league, "language": "en"}
+    # 1. CURRENT: /poe1/api/data/buildoverview?league={league}
+    params_poe1: dict[str, str] = {"league": league, "language": "en"}
     if class_name:
-        params_new["class"] = class_name
-    candidates.append((POE_NINJA_BUILDS_ENDPOINT, params_new))
+        params_poe1["class"] = class_name
+    candidates.append((POE_NINJA_BUILDS_ENDPOINT, params_poe1))
 
-    # LEGACY endpoint: /builds?overview={league}&type=exp
+    # 2. ALT: /api/data/buildoverview?league={league}  (without poe1 prefix)
+    params_alt: dict[str, str] = {"league": league, "language": "en"}
+    if class_name:
+        params_alt["class"] = class_name
+    candidates.append((POE_NINJA_BUILDS_ENDPOINT_ALT, params_alt))
+
+    # 3. LEGACY: /api/data/builds?overview={league}&type=exp
     params_legacy: dict[str, str] = {"overview": league, "type": "exp", "language": "en"}
     if class_name:
         params_legacy["class"] = class_name

@@ -12,7 +12,8 @@ IMPORTANT: poe.ninja is a Single-Page Application (SPA).  Scraping its
 HTML (like with urllib + regex) will only give you a JS bundle, NOT build
 data.  The correct approach is to use the **JSON API endpoints**:
 
-  Builds:    https://poe.ninja/api/data/buildoverview?league={league}&language=en
+  Builds:    https://poe.ninja/poe1/api/data/buildoverview?league={league}&language=en
+             (alt: https://poe.ninja/api/data/buildoverview?league={league}&language=en)
              (legacy: https://poe.ninja/api/data/builds?overview={league}&type=exp&language=en)
   Currency:  https://poe.ninja/api/data/currencyoverview?league={league}&type=Currency
   Items:     https://poe.ninja/api/data/itemoverview?league={league}&type={type}
@@ -90,9 +91,14 @@ def probe_builds(league: str) -> dict[str, Any]:
     # Endpoint candidates: (url, params, label)
     candidates = [
         (
+            f"https://poe.ninja/poe1/api/data/buildoverview",
+            {"league": league, "language": "en"},
+            "poe1/buildoverview (current)",
+        ),
+        (
             f"{POE_NINJA_BASE}/buildoverview",
             {"league": league, "language": "en"},
-            "buildoverview (new)",
+            "buildoverview (alt)",
         ),
         (
             f"{POE_NINJA_BASE}/builds",

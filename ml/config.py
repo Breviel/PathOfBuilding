@@ -29,14 +29,21 @@ LEAGUE = os.getenv("POE_LEAGUE", "Mirage")  # change each league
 # poe.ninja API base URLs (community-documented, see:
 #   https://github.com/Davenads/poeninjaAPI-2025
 #   https://github.com/JakubRak-gamedev/poeninja_API_guide)
+#
+# Economy endpoints (currency, items) still live under /api/data/.
+# Builds migrated to /poe1/api/data/ when poe.ninja added PoE2 support.
 POE_NINJA_POE1_BASE = "https://poe.ninja/api/data"
+POE_NINJA_POE1_BUILDS_BASE = "https://poe.ninja/poe1/api/data"
 POE_NINJA_POE2_BASE = "https://poe.ninja/poe2/api"
 
 # Builds endpoint — returns character data (passive trees, items, skills)
-# As of 2026, poe.ninja migrated from /builds?overview={league} to
-# /buildoverview?league={league}.  We try the new endpoint first and
-# fall back to the legacy one (see poe_ninja.py `_builds_url`).
-POE_NINJA_BUILDS_ENDPOINT = f"{POE_NINJA_POE1_BASE}/buildoverview"
+# As of 2026, poe.ninja moved builds under /poe1/api/data/buildoverview.
+# We try three variants in order (see poe_ninja.py `_init_builds_endpoints`):
+#   1. /poe1/api/data/buildoverview?league={league}   (current, poe1-prefixed)
+#   2. /api/data/buildoverview?league={league}         (without poe1 prefix)
+#   3. /api/data/builds?overview={league}&type=exp     (legacy pre-2026)
+POE_NINJA_BUILDS_ENDPOINT = f"{POE_NINJA_POE1_BUILDS_BASE}/buildoverview"
+POE_NINJA_BUILDS_ENDPOINT_ALT = f"{POE_NINJA_POE1_BASE}/buildoverview"
 POE_NINJA_BUILDS_ENDPOINT_LEGACY = f"{POE_NINJA_POE1_BASE}/builds"
 
 # Economy endpoints — returns item/currency prices
