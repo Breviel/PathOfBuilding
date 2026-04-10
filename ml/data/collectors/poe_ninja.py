@@ -1,11 +1,9 @@
 """
-poe.ninja data collector — builds + economy.
+poe.ninja data collector — builds + economy (PoE 1 only).
 
 Collects from the poe.ninja public JSON API (no auth required):
 
-**Builds** (versioned 2-step flow, 2026+):
-- Step 1: GET /poe1/api/data/index-state → snapshot versions
-- Step 2: GET /poe1/api/builds/{version}/overview?overview={league}&type=exp
+**Builds** (`/api/data/0/getbuildoverview`):
 - Passive tree allocations (node hashes / IDs)
 - Equipped gear (base types, mods, sockets)
 - Skill gem setups (active + support links)
@@ -45,7 +43,10 @@ from loguru import logger
 from ml.config import (
     DATA_RAW_DIR,
     LEAGUE,
-    POE_NINJA_BUILDS_BASE,
+    POE_NINJA_BUILDS_CHARACTER_BASE,
+    POE_NINJA_BUILDS_ENDPOINT,
+    POE_NINJA_BUILDS_ENDPOINT_ALT,
+    POE_NINJA_BUILDS_ENDPOINT_FALLBACK,
     POE_NINJA_CURRENCY_ENDPOINT,
     POE_NINJA_INDEX_STATE_ENDPOINT,
     POE_NINJA_ITEM_ENDPOINT,
@@ -138,23 +139,17 @@ async def _get_json(
 #  BUILDS COLLECTION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# poe.ninja builds API (2026+ versioned flow):
+# poe.ninja builds API:
 #
-# STEP 1 — Index state:
-#   GET https://poe.ninja/poe1/api/data/index-state
-#   Response:
-#   {
-#     "buildLeagues":   [{"name": "Mirage", "url": "mirage", ...}],
-#     "economyLeagues": [...],
-#     "snapshotVersions": [
-#       {"url": "mirage", "type": "exp", "version": "0839-20260410-00510", ...},
-#       ...
-#     ]
-#   }
+# BUILDS OVERVIEW (bulk data):
+#   GET https://poe.ninja/api/data/0/getbuildoverview
+#       ?overview={league_lowercase}&type=exp&language=en
 #
-# STEP 2 — Builds overview:
-#   GET https://poe.ninja/poe1/api/builds/{version}/overview?overview={league_url}&type=exp
-#   Response (same structure as old buildoverview):
+#   With poe1 prefix (for PoE1-specific routing):
+#   GET https://poe.ninja/poe1/api/data/0/getbuildoverview
+#       ?overview={league_lowercase}&type=exp&language=en
+#
+# Response (JSON):
 #   {
 #     "classNames":       ["Marauder", "Ranger", ...],
 #     "uniqueItems":      [...],
@@ -164,9 +159,9 @@ async def _get_json(
 #       {
 #         "account":     "...",
 #         "character":   "...",
-#         "class":       3,
+#         "class":       3,            ← index into classNames
 #         "level":       99,
-#         "treeHashes":  [12345, ...],
+#         "treeHashes":  [12345, ...], ← allocated passive node IDs
 #         "items":       [{...}, ...],
 #         "skills":      [{...}, ...],
 #         "life":        5200,
@@ -179,88 +174,56 @@ async def _get_json(
 #     ]
 #   }
 #
-# Individual character detail:
+# INDIVIDUAL CHARACTER (requires snapshot version from index-state):
 #   GET https://poe.ninja/poe1/api/builds/{version}/character
 #       ?account={acct}&name={name}&overview={league_url}&type=0
 #
 # Per-class filter on overview:
 #   &class={ClassName}
 
-# ── Snapshot version discovery ─────────────────────────────────────────
+# ── Index-state (league / snapshot metadata) ───────────────────────────
 
 
 async def _get_index_state(
     session: aiohttp.ClientSession,
     rate_limiter: _RateLimiter,
 ) -> dict[str, Any]:
-    """Fetch the poe.ninja index-state to discover snapshot versions."""
+    """Fetch the poe.ninja index-state to discover leagues and snapshot versions."""
     logger.debug(f"Fetching index-state: {POE_NINJA_INDEX_STATE_ENDPOINT}")
     return await _get_json(session, POE_NINJA_INDEX_STATE_ENDPOINT, rate_limiter)
 
 
-def _get_snapshot_version(
-    index_state: dict[str, Any],
+# ── Builds endpoint candidates ─────────────────────────────────────────
+# We try three URL variants in order because poe.ninja has changed its
+# routing several times.  The first success is cached for subsequent calls.
+
+
+def _init_builds_endpoints(
     league: str,
-    snapshot_type: str = "exp",
-) -> str:
-    """
-    Extract the snapshot version string for a given league from index-state.
-
-    Args:
-        index_state: Parsed index-state response.
-        league: League name (case-insensitive; matched against url field).
-        snapshot_type: Snapshot type to look for (default "exp" for ladder).
-
-    Returns:
-        Version string like "0839-20260410-00510".
-
-    Raises:
-        ValueError: If no matching snapshot is found.
-    """
+    class_name: str | None = None,
+) -> list[tuple[str, dict[str, str]]]:
+    """Return (url, params) pairs to try for the builds overview."""
     league_lower = league.lower()
-    snapshots = index_state.get("snapshotVersions", [])
+    candidates: list[tuple[str, dict[str, str]]] = []
 
-    for snap in snapshots:
-        if snap.get("url", "").lower() == league_lower and snap.get("type") == snapshot_type:
-            version = snap.get("version", "")
-            if version:
-                logger.debug(f"Found snapshot version {version!r} for {league}/{snapshot_type}")
-                return version
+    base_params: dict[str, str] = {
+        "overview": league_lower,
+        "type": "exp",
+        "language": "en",
+    }
+    if class_name:
+        base_params["class"] = class_name
 
-    # Fallback: try any snapshot matching the league (ignore type)
-    for snap in snapshots:
-        if snap.get("url", "").lower() == league_lower:
-            version = snap.get("version", "")
-            if version:
-                logger.warning(
-                    f"No snapshot type={snapshot_type!r} for {league}; "
-                    f"using type={snap.get('type')!r} version={version!r}"
-                )
-                return version
+    # 1. poe1-prefixed: /poe1/api/data/0/getbuildoverview
+    candidates.append((POE_NINJA_BUILDS_ENDPOINT, dict(base_params)))
 
-    available = [
-        f"{s.get('url')}/{s.get('type')}={s.get('version')}"
-        for s in snapshots
-    ]
-    raise ValueError(
-        f"No snapshot version found for league={league!r}, type={snapshot_type!r}. "
-        f"Available: {available}"
-    )
+    # 2. Original: /api/data/0/getbuildoverview
+    candidates.append((POE_NINJA_BUILDS_ENDPOINT_ALT, dict(base_params)))
 
+    # 3. Fallback (without /0/): /poe1/api/data/getbuildoverview
+    candidates.append((POE_NINJA_BUILDS_ENDPOINT_FALLBACK, dict(base_params)))
 
-def _get_league_url(index_state: dict[str, Any], league: str) -> str:
-    """Get the lowercase URL form of the league name from index-state."""
-    league_lower = league.lower()
-
-    for bl in index_state.get("buildLeagues", []):
-        if bl.get("name", "").lower() == league_lower or bl.get("url", "").lower() == league_lower:
-            return bl.get("url", league_lower)
-
-    # Fallback: use lowercase league name directly
-    return league_lower
-
-
-# ── Builds fetching ────────────────────────────────────────────────────
+    return candidates
 
 
 async def _get_builds_json(
@@ -268,32 +231,29 @@ async def _get_builds_json(
     rate_limiter: _RateLimiter,
     league: str,
     class_name: str | None = None,
-    *,
-    index_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
-    Fetch builds data using the 2-step versioned flow.
+    Fetch builds overview data, trying multiple endpoint candidates.
 
-    1. Fetch index-state (or reuse if provided) to get the snapshot version.
-    2. Fetch builds overview from /poe1/api/builds/{version}/overview.
-
-    Returns the parsed JSON response.
+    Tries endpoints in order (poe1-prefixed, original, fallback).
+    Returns the parsed JSON response from whichever endpoint succeeds.
+    Raises RuntimeError if all endpoints fail.
     """
-    # Step 1: Get index state if not provided
-    if index_state is None:
-        index_state = await _get_index_state(session, rate_limiter)
+    candidates = _init_builds_endpoints(league, class_name)
+    last_exc: Exception | None = None
 
-    version = _get_snapshot_version(index_state, league)
-    league_url = _get_league_url(index_state, league)
+    for url, params in candidates:
+        try:
+            logger.debug(f"Trying builds endpoint: {url} params={params}")
+            return await _get_json(session, url, rate_limiter, params=params)
+        except Exception as exc:
+            logger.debug(f"Endpoint {url} failed: {exc}")
+            last_exc = exc
 
-    # Step 2: Fetch builds overview
-    url = f"{POE_NINJA_BUILDS_BASE}/{version}/overview"
-    params: dict[str, str] = {"overview": league_url, "type": "exp"}
-    if class_name:
-        params["class"] = class_name
-
-    logger.debug(f"Fetching builds: {url} params={params}")
-    return await _get_json(session, url, rate_limiter, params=params)
+    raise RuntimeError(
+        f"All builds endpoints failed for league={league!r}, class={class_name!r}. "
+        f"Last error: {last_exc}"
+    ) from last_exc
 
 
 def _normalise_build(
@@ -340,15 +300,9 @@ async def collect_builds(
     rl = _RateLimiter()
 
     async with aiohttp.ClientSession(headers=_HEADERS, timeout=_TIMEOUT) as session:
-        # 0. Fetch index-state once (shared across all requests)
-        logger.info("Fetching poe.ninja index-state for snapshot version")
-        index_state = await _get_index_state(session, rl)
-        version = _get_snapshot_version(index_state, league)
-        logger.info(f"Using snapshot version: {version}")
-
         # 1. Overview — shared lookup tables
         logger.info(f"Fetching builds overview for {league}")
-        overview = await _get_builds_json(session, rl, league, index_state=index_state)
+        overview = await _get_builds_json(session, rl, league)
         class_names = overview.get("classNames", [])
 
         lookup_path = out_dir / "lookup_tables.json"
@@ -365,7 +319,7 @@ async def collect_builds(
         for cls in classes:
             logger.info(f"Collecting {cls} (max {max_per_class})")
             try:
-                data = await _get_builds_json(session, rl, league, cls, index_state=index_state)
+                data = await _get_builds_json(session, rl, league, cls)
             except Exception as exc:
                 logger.warning(f"Failed to fetch {cls}: {exc}")
                 continue
@@ -513,10 +467,10 @@ async def probe_api(league: str | None = None) -> dict[str, Any]:
             results["endpoints"]["index_state"] = {"status": "FAILED", "error": str(exc)}
             logger.error(f"  ✗ {exc}")
 
-        # 1. Builds overview (using versioned endpoint)
-        logger.info(f"Probing builds for {league} (versioned endpoint)")
+        # 1. Builds overview
+        logger.info(f"Probing builds for {league}")
         try:
-            data = await _get_builds_json(session, rl, league, index_state=index_state)
+            data = await _get_builds_json(session, rl, league)
             n_builds = len(data.get("builds", []))
             class_names = data.get("classNames", [])
             sample_keys = list(data.get("builds", [{}])[0].keys()) if n_builds else []

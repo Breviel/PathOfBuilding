@@ -30,33 +30,40 @@ LEAGUE = os.getenv("POE_LEAGUE", "Mirage")  # change each league
 #   https://github.com/Davenads/poeninjaAPI-2025
 #   https://github.com/JakubRak-gamedev/poeninja_API_guide)
 #
-# Economy endpoints (currency, items) still live under /api/data/.
-# Builds migrated to a versioned 2-step flow under /poe1/api/ in 2026.
-POE_NINJA_ECONOMY_BASE = "https://poe.ninja/api/data"
-POE_NINJA_POE1_BASE = "https://poe.ninja/poe1/api"
-POE_NINJA_POE2_BASE = "https://poe.ninja/poe2/api"
+# Economy endpoints (currency, items) live under /api/data/.
+# Builds use /api/data/0/getbuildoverview (the "0" is a static path segment).
+# Index-state lives under /poe1/api/data/ for league/snapshot metadata.
+POE_NINJA_API_BASE = "https://poe.ninja/api/data"
+POE_NINJA_POE1_API_BASE = "https://poe.ninja/poe1/api/data"
 
-# Builds endpoint — 2-step versioned flow (2026+):
-#   Step 1: GET /poe1/api/data/index-state
-#           → returns {buildLeagues, economyLeagues, snapshotVersions}
-#           → snapshotVersions[].version gives the version string
-#             (e.g. "0839-20260410-00510")
-#   Step 2: GET /poe1/api/builds/{version}/overview?overview={league_url}&type=exp
-#           → returns builds overview (classNames, builds, uniqueItems, …)
-#           Individual character:
-#           GET /poe1/api/builds/{version}/character?account={acct}&name={name}&overview={league_url}&type=0
+# Builds overview endpoint — returns character data (passive trees, items, skills)
+# Known working format (confirmed from multiple open-source projects):
+#   GET /api/data/0/getbuildoverview?overview={league_lowercase}&type=exp&language=en
+# Response: { classNames, uniqueItems, keystoneHashes, skills, builds: [...] }
 #
-# The league_url is lowercase (e.g. "mirage" not "Mirage").
-# The old /buildoverview and /builds endpoints are gone (404).
-POE_NINJA_INDEX_STATE_ENDPOINT = f"{POE_NINJA_POE1_BASE}/data/index-state"
-POE_NINJA_BUILDS_BASE = f"{POE_NINJA_POE1_BASE}/builds"
+# When poe.ninja added PoE2 support, some endpoints moved under /poe1/.
+# We try three candidates in order (see poe_ninja.py _get_builds_json):
+#   1. /poe1/api/data/0/getbuildoverview  (poe1-prefixed, current)
+#   2. /api/data/0/getbuildoverview        (original, no prefix)
+#   3. /poe1/api/data/getbuildoverview     (without /0/ segment)
+POE_NINJA_BUILDS_ENDPOINT = f"{POE_NINJA_POE1_API_BASE}/0/getbuildoverview"
+POE_NINJA_BUILDS_ENDPOINT_ALT = f"{POE_NINJA_API_BASE}/0/getbuildoverview"
+POE_NINJA_BUILDS_ENDPOINT_FALLBACK = f"{POE_NINJA_POE1_API_BASE}/getbuildoverview"
+
+# Index-state endpoint — returns league info and snapshot versions
+# Used for discovering leagues and for individual character lookups.
+#   GET /poe1/api/data/index-state
+#   → { buildLeagues, economyLeagues, snapshotVersions }
+POE_NINJA_INDEX_STATE_ENDPOINT = f"{POE_NINJA_POE1_API_BASE}/index-state"
+
+# Individual character detail (requires snapshot version from index-state):
+#   GET /poe1/api/builds/{version}/character
+#       ?account={acct}&name={name}&overview={league_url}&type=0
+POE_NINJA_BUILDS_CHARACTER_BASE = "https://poe.ninja/poe1/api/builds"
 
 # Economy endpoints — returns item/currency prices
-POE_NINJA_CURRENCY_ENDPOINT = f"{POE_NINJA_ECONOMY_BASE}/currencyoverview"
-POE_NINJA_ITEM_ENDPOINT = f"{POE_NINJA_ECONOMY_BASE}/itemoverview"
-
-# PoE2 economy endpoint (undocumented, discovered via network interception Oct 2025)
-POE_NINJA_POE2_ECONOMY = f"{POE_NINJA_POE2_BASE}/economy/currencyexchange/overview"
+POE_NINJA_CURRENCY_ENDPOINT = f"{POE_NINJA_API_BASE}/currencyoverview"
+POE_NINJA_ITEM_ENDPOINT = f"{POE_NINJA_API_BASE}/itemoverview"
 
 # Supported economy item types for itemoverview endpoint
 POE_NINJA_ITEM_TYPES = [
