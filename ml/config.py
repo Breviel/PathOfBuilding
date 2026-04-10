@@ -31,24 +31,29 @@ LEAGUE = os.getenv("POE_LEAGUE", "Mirage")  # change each league
 #   https://github.com/JakubRak-gamedev/poeninja_API_guide)
 #
 # Economy endpoints (currency, items) still live under /api/data/.
-# Builds migrated to /poe1/api/data/ when poe.ninja added PoE2 support.
-POE_NINJA_POE1_BASE = "https://poe.ninja/api/data"
-POE_NINJA_POE1_BUILDS_BASE = "https://poe.ninja/poe1/api/data"
+# Builds migrated to a versioned 2-step flow under /poe1/api/ in 2026.
+POE_NINJA_ECONOMY_BASE = "https://poe.ninja/api/data"
+POE_NINJA_POE1_BASE = "https://poe.ninja/poe1/api"
 POE_NINJA_POE2_BASE = "https://poe.ninja/poe2/api"
 
-# Builds endpoint — returns character data (passive trees, items, skills)
-# As of 2026, poe.ninja moved builds under /poe1/api/data/buildoverview.
-# We try three variants in order (see poe_ninja.py `_init_builds_endpoints`):
-#   1. /poe1/api/data/buildoverview?league={league}   (current, poe1-prefixed)
-#   2. /api/data/buildoverview?league={league}         (without poe1 prefix)
-#   3. /api/data/builds?overview={league}&type=exp     (legacy pre-2026)
-POE_NINJA_BUILDS_ENDPOINT = f"{POE_NINJA_POE1_BUILDS_BASE}/buildoverview"
-POE_NINJA_BUILDS_ENDPOINT_ALT = f"{POE_NINJA_POE1_BASE}/buildoverview"
-POE_NINJA_BUILDS_ENDPOINT_LEGACY = f"{POE_NINJA_POE1_BASE}/builds"
+# Builds endpoint — 2-step versioned flow (2026+):
+#   Step 1: GET /poe1/api/data/index-state
+#           → returns {buildLeagues, economyLeagues, snapshotVersions}
+#           → snapshotVersions[].version gives the version string
+#             (e.g. "0839-20260410-00510")
+#   Step 2: GET /poe1/api/builds/{version}/overview?overview={league_url}&type=exp
+#           → returns builds overview (classNames, builds, uniqueItems, …)
+#           Individual character:
+#           GET /poe1/api/builds/{version}/character?account={acct}&name={name}&overview={league_url}&type=0
+#
+# The league_url is lowercase (e.g. "mirage" not "Mirage").
+# The old /buildoverview and /builds endpoints are gone (404).
+POE_NINJA_INDEX_STATE_ENDPOINT = f"{POE_NINJA_POE1_BASE}/data/index-state"
+POE_NINJA_BUILDS_BASE = f"{POE_NINJA_POE1_BASE}/builds"
 
 # Economy endpoints — returns item/currency prices
-POE_NINJA_CURRENCY_ENDPOINT = f"{POE_NINJA_POE1_BASE}/currencyoverview"
-POE_NINJA_ITEM_ENDPOINT = f"{POE_NINJA_POE1_BASE}/itemoverview"
+POE_NINJA_CURRENCY_ENDPOINT = f"{POE_NINJA_ECONOMY_BASE}/currencyoverview"
+POE_NINJA_ITEM_ENDPOINT = f"{POE_NINJA_ECONOMY_BASE}/itemoverview"
 
 # PoE2 economy endpoint (undocumented, discovered via network interception Oct 2025)
 POE_NINJA_POE2_ECONOMY = f"{POE_NINJA_POE2_BASE}/economy/currencyexchange/overview"
